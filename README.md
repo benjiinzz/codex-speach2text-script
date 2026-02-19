@@ -200,6 +200,4 @@ tail -n 200 "${XDG_RUNTIME_DIR:-/tmp}/codex_ptt/ptt.log"
 - “Untrusted folder” warnings: `codex_ptt_stop` runs `codex exec` from the detected Codex pane’s CWD to avoid this.
 - The “compress prompt” step is intentionally simple (single-instruction output). Tweak the `COMPRESS_PROMPT` string in `codex_ptt_stop` if you want different formatting.
 
-## License
 
-No license is included yet. If you want this to be broadly usable, add an MIT license.
