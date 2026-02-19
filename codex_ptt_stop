@@ -140,7 +140,16 @@ if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "null" ]]; then
 fi
 
 # Compress to a tight instruction (run codex exec from Codex pane cwd to avoid "untrusted folder")
-COMPRESS_PROMPT=$'Rewrite the following speech transcript into ONE concise instruction for Codex CLI.\n\nRules:\n- Output ONLY the instruction (no preamble).\n- Use imperative mood.\n- Preserve file paths, identifiers, commands, and numbers exactly.\n- If multiple tasks, separate with "; ".\n\nTranscript:\n'"$TRANSCRIPT"
+PROMPT_FILE="${CODEX_HOME:-$HOME/.codex}/prompts/voice_compress.md"
+
+if [[ -f "$PROMPT_FILE" ]]; then
+  RULES="$(cat "$PROMPT_FILE")"
+else
+  RULES=$'Rewrite the given speech transcript into ONE concise instruction for Codex CLI.\n\nRules:\n- Output ONLY the instruction (no preamble).\n- Use imperative mood.\n- Preserve file paths, identifiers, commands, and numbers exactly.\n- If multiple tasks: separate with "; ".\n- Keep it short and actionable.\n'
+fi
+
+COMPRESS_PROMPT="${RULES}"$'\n\nTranscript:\n'"$TRANSCRIPT"
+
 
 log "compressing with codex exec..."
 notify "Compressing…"
