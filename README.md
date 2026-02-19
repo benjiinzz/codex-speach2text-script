@@ -138,6 +138,7 @@ Bind a key to run:
 ~/.local/bin/codex_ptt_toggle
 ```
 
+
 Behavior:
 
 - First press: start recording
@@ -170,6 +171,26 @@ Reload sway config.
 ### Example: KDE / GNOME
 
 Use your system’s “Custom Shortcuts” UI to run `~/.local/bin/codex_ptt_toggle`.
+
+### Alternative: Hold-To-Talk
+
+Use either native Sway:
+```
+bindsym {keybind} exec ~/.local/bin/codex_ptt_start
+bindsym --release {keybind} exec ~/.local/bin/codex_ptt_stop
+```
+Or keyd:
+
+```
+[main]
+{keybind} = overload(codexptt, rightalt)
+
+[codexptt]
+{keybind} = macro(exec ~/.local/bin/codex_ptt_start)
+{keybind}:up = macro(exec ~/.local/bin/codex_ptt_stop)
+```
+
+Use `~/.local/bin/codex_ptt_start`
 
 ## Usage
 
