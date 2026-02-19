@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+PROMPTS_DIR="$CODEX_HOME/prompts"
+PROMPT_FILE="$PROMPTS_DIR/voice_compress.md"
+
+mkdir -p "$PROMPTS_DIR"
+
+if [[ -f "$PROMPT_FILE" ]]; then
+  echo "Exists: $PROMPT_FILE"
+  echo "Edit it to customize your voice->prompt compression."
+  exit 0
+fi
+
+cat > "$PROMPT_FILE" <<'PROMPT'
+Rewrite the given speech transcript into ONE concise instruction for Codex CLI.
+
+Rules:
+- Output ONLY the instruction (no preamble).
+- Use imperative mood.
+- Preserve file paths, identifiers, commands, and numbers exactly.
+- If multiple tasks: separate with "; ".
+- Keep it short and actionable.
+PROMPT
+
+echo "Created: $PROMPT_FILE"
+echo "Customize it anytime."
