@@ -1,98 +1,97 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/codex_ptt"
+UID_NUM="$(id -u)"
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
+RUNDIR="$XDG_RUNTIME_DIR/codex_ptt"
+
 WAV="$RUNDIR/voice.wav"
 PIDFILE="$RUNDIR/rec.pid"
 LOG="$RUNDIR/ptt.log"
 
 # whisper.cpp config
 WHISPER_DIR="${WHISPER_DIR:-$HOME/src/whisper.cpp}"
-WHISPER_BIN="$WHISPER_DIR/build/bin/whisper-cli"
+WHISPER_BIN_CPU="$WHISPER_DIR/build-cpu/bin/whisper-cli"
+WHISPER_BIN_CUDA="$WHISPER_DIR/build-cuda/bin/whisper-cli"   # optional (may not exist yet)
 MODEL="$WHISPER_DIR/models/ggml-base.en.bin"
 
 # deps
 command -v wezterm >/dev/null 2>&1 || { echo "wezterm not found" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq not found (install jq)" >&2; exit 1; }
-[[ -x "$WHISPER_BIN" ]] || { echo "whisper-cli not found at $WHISPER_BIN" >&2; exit 1; }
+[[ -x "$WHISPER_BIN_CPU" ]] || { echo "CPU whisper-cli not found at $WHISPER_BIN_CPU" >&2; exit 1; }
 [[ -f "$MODEL" ]] || { echo "model not found at $MODEL" >&2; exit 1; }
 
 log() { echo "$*" >> "$LOG"; }
+notify() { command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "$1" || true; }
 
-notify() {
-  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "$1" || true
+pick_whisper_bin() {
+  # Prefer CUDA only if it exists and nvidia-smi works; otherwise CPU.
+  if [[ -x "$WHISPER_BIN_CUDA" ]] && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+    echo "$WHISPER_BIN_CUDA"
+  else
+    echo "$WHISPER_BIN_CPU"
+  fi
 }
-
 
 get_codex_pane_id() {
   local focus tab win codex
-
   focus="$(wezterm cli list-clients --format json | jq -r 'sort_by(.idle) | .[0].focus')"
-
   tab="$(wezterm cli list --format json | jq -r --argjson p "$focus" '.[] | select(.pane_id==$p) | .tab_id' | head -n1)"
   win="$(wezterm cli list --format json | jq -r --argjson p "$focus" '.[] | select(.pane_id==$p) | .window_id' | head -n1)"
 
-  # Same tab
+  # same tab
   codex="$(wezterm cli list --format json | jq -r --argjson tab "$tab" '
     .[] | select(.tab_id==$tab) | select((.title // "")=="CODEX_TUI") | .pane_id' | head -n1)"
-
-  # Same window
+  # same window
   if [[ -z "$codex" ]]; then
     codex="$(wezterm cli list --format json | jq -r --argjson win "$win" '
       .[] | select(.window_id==$win) | select((.title // "")=="CODEX_TUI") | .pane_id' | head -n1)"
   fi
-
-  # Global fallback (this will pick your pane 4)
+  # global fallback
   if [[ -z "$codex" ]]; then
     codex="$(wezterm cli list --format json | jq -r '
       .[] | select((.title // "")=="CODEX_TUI") | .pane_id' | head -n1)"
   fi
-
   echo "$codex"
 }
-
-
 
 get_pane_cwd() {
   local pane_id="${1:?pane id required}"
   local cwd
-  cwd="$(wezterm cli list --format json \
-    | jq -r --argjson p "$pane_id" '.[] | select(.pane_id==$p) | .cwd' \
-    | head -n1)"
-
-  # WezTerm returns file://HOST/path/...; convert to /path/...
-  # Example: file://omarchy/home/benjiin/Work -> /home/benjiin/Work
+  cwd="$(wezterm cli list --format json | jq -r --argjson p "$pane_id" '.[] | select(.pane_id==$p) | .cwd' | head -n1)"
+  # file://host/path -> /path
   echo "$cwd" | sed -E 's#^file://[^/]+##' | sed -E 's#/$##'
 }
 
-
 log "---- STOP $(date) ----"
 log "cwd=$(pwd)"
+log "RUNDIR=$RUNDIR"
 
-# Stop recorder
+# STOP RECORDING (this is the critical part)
 if [[ -f "$PIDFILE" ]]; then
   pid="$(cat "$PIDFILE" 2>/dev/null || true)"
-  log "pidfile pid=$pid"
+  log "pidfile=$PIDFILE pid=$pid"
   if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
     kill -INT "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     log "killed pid=$pid"
   else
-    log "pid not running"
+    log "pid not running (or empty)"
   fi
   rm -f "$PIDFILE"
 else
-  log "no pidfile"
+  log "no pidfile at $PIDFILE"
+  notify "No pidfile (start/stop paths mismatch?)"
+  exit 0
 fi
 
 # Require audio
 if [[ ! -s "$WAV" ]]; then
-  log "no wav (empty/missing)"
+  log "no wav (empty/missing) at $WAV"
   notify "No audio captured"
   exit 0
 fi
 
-# Ignore super-short clips (~0.2s)
 wav_bytes="$(stat -c%s "$WAV" 2>/dev/null || echo 0)"
 log "wav_bytes=$wav_bytes"
 if [[ "$wav_bytes" -lt 6000 ]]; then
@@ -106,41 +105,34 @@ BASE="$RUNDIR/voice"
 TXT="$BASE.txt"
 rm -f "$TXT"
 
-log "transcribing..."
+WHISPER_BIN="$(pick_whisper_bin)"
+log "whisper_bin=$WHISPER_BIN"
 notify "Transcribing…"
+
 "$WHISPER_BIN" -m "$MODEL" -f "$WAV" -otxt -of "$BASE" >>"$LOG" 2>&1 || true
 
 if [[ ! -s "$TXT" ]]; then
   log "no transcript created"
-  notify "Transcription failed (see ptt.log)"
+  notify "No transcript created (see ptt.log)"
   exit 0
 fi
 
 TRANSCRIPT="$(tr -d '\r' < "$TXT" | sed -e 's/[[:space:]]\+/ /g' -e 's/^ *//; s/ *$//')"
 log "transcript=$TRANSCRIPT"
-if [[ -z "$TRANSCRIPT" ]]; then
-  log "empty transcript"
-  notify "Empty transcript"
-  exit 0
-fi
+[[ -n "$TRANSCRIPT" ]] || { notify "Empty transcript"; exit 0; }
 
-# Find CODEX_TUI pane + its cwd
+# Find CODEX_TUI pane + cwd
 CODEX_PANE="$(get_codex_pane_id)"
 log "codex_pane=$CODEX_PANE"
-if [[ -z "$CODEX_PANE" ]]; then
-  notify "No CODEX_TUI pane found"
-  exit 0
-fi
+[[ -n "$CODEX_PANE" ]] || { notify "No CODEX_TUI pane found"; exit 0; }
 
 PROJECT_DIR="$(get_pane_cwd "$CODEX_PANE")"
 log "codex_cwd=$PROJECT_DIR"
-if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "null" ]]; then
-  notify "Couldn't read Codex pane cwd"
-  exit 0
-fi
+[[ -n "$PROJECT_DIR" && "$PROJECT_DIR" != "null" ]] || { notify "Couldn't read Codex pane cwd"; exit 0; }
 
-# Compress to a tight instruction (run codex exec from Codex pane cwd to avoid "untrusted folder")
+# Load global compression rules if present
 PROMPT_FILE="${CODEX_HOME:-$HOME/.codex}/prompts/voice_compress.md"
+log "prompt_file=$PROMPT_FILE exists=$([[ -f "$PROMPT_FILE" ]] && echo yes || echo no)"
 
 if [[ -f "$PROMPT_FILE" ]]; then
   RULES="$(cat "$PROMPT_FILE")"
@@ -150,22 +142,15 @@ fi
 
 COMPRESS_PROMPT="${RULES}"$'\n\nTranscript:\n'"$TRANSCRIPT"
 
-
-log "compressing with codex exec..."
 notify "Compressing…"
 FINAL="$(cd "$PROJECT_DIR" && codex exec "$COMPRESS_PROMPT" 2>>"$LOG" | tr -d '\r' || true)"
 FINAL="$(echo "$FINAL" | sed -e 's/[[:space:]]\+/ /g' -e 's/^ *//; s/ *$//')"
 log "final=$FINAL"
-if [[ -z "$FINAL" ]]; then
-  notify "Compression produced empty output (see ptt.log)"
-  exit 0
-fi
+[[ -n "$FINAL" ]] || { notify "Compression produced empty output"; exit 0; }
 
-# Paste into Codex pane + press Enter
+# Send to Codex pane
 printf "%s" "$FINAL" | wezterm cli send-text --pane-id "$CODEX_PANE"
 printf "\n" | wezterm cli send-text --pane-id "$CODEX_PANE"
 log "sent to pane $CODEX_PANE"
 
-# Short status notification (don’t spam the whole prompt)
-short="$(echo "$FINAL" | cut -c1-80)"
-notify "Sent: $short"
+notify "Sent: $(echo "$FINAL" | cut -c1-80)"

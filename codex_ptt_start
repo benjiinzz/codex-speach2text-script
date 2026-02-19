@@ -2,16 +2,22 @@
 set -euo pipefail
 
 MIC_ID="59"
-RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/codex_ptt"
+
+UID_NUM="$(id -u)"
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
+RUNDIR="$XDG_RUNTIME_DIR/codex_ptt"
+
 mkdir -p "$RUNDIR"
 
 WAV="$RUNDIR/voice.wav"
 PIDFILE="$RUNDIR/rec.pid"
 LOG="$RUNDIR/ptt.log"
 
+notify() { command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "$1" || true; }
+
 # If already recording, do nothing
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Already recording" || true
+  notify "Already recording"
   exit 0
 fi
 
@@ -23,6 +29,7 @@ rm -f "$WAV"
   echo "---- START $(date) ----"
   echo "cwd=$(pwd)"
   echo "MIC_ID=$MIC_ID"
+  echo "RUNDIR=$RUNDIR"
   echo "WAV=$WAV"
 } >> "$LOG"
 
@@ -33,8 +40,8 @@ echo "pw-record pid=$pid" >> "$LOG"
 
 sleep 0.05
 if kill -0 "$pid" 2>/dev/null; then
-  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Recording…" || true
+  notify "Recording…"
 else
   echo "pw-record died immediately" >> "$LOG"
-  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Recording failed (see ptt.log)" || true
+  notify "Recording failed (see ptt.log)"
 fi

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/codex_ptt"
+UID_NUM="$(id -u)"
+XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
+RUNDIR="$XDG_RUNTIME_DIR/codex_ptt"
 PIDFILE="$RUNDIR/rec.pid"
 
 mkdir -p "$RUNDIR"
