@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Point this at the codex you actually want to run:
+# (use your NVM one since that's what `which codex` showed earlier)
+REAL_CODEX="$HOME/.config/nvm/versions/node/v24.13.1/bin/codex"
+
+TITLE="CODEX_TUI"
+
+# Only tag interactive sessions inside wezterm
+if [[ -n "${WEZTERM_PANE:-}" && -t 0 && -t 1 ]]; then
+  # Set pane title (shows up as TITLE in `wezterm cli list`)
+  printf '\033]0;%s\007' "$TITLE" || true
+  # Optional: also set tab title (nice, not required)
+  command -v wezterm >/dev/null 2>&1 && wezterm cli set-tab-title "$TITLE" >/dev/null 2>&1 || true
+fi
+
+exec "$REAL_CODEX" "$@"

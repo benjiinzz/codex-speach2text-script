@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MIC_ID="59"
+RUNDIR="${XDG_RUNTIME_DIR:-/tmp}/codex_ptt"
+mkdir -p "$RUNDIR"
+
+WAV="$RUNDIR/voice.wav"
+PIDFILE="$RUNDIR/rec.pid"
+LOG="$RUNDIR/ptt.log"
+
+# If already recording, do nothing
+if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Already recording" || true
+  exit 0
+fi
+
+# New cycle: truncate log and reset wav
+: > "$LOG"
+rm -f "$WAV"
+
+{
+  echo "---- START $(date) ----"
+  echo "cwd=$(pwd)"
+  echo "MIC_ID=$MIC_ID"
+  echo "WAV=$WAV"
+} >> "$LOG"
+
+pw-record --target "$MIC_ID" --rate 16000 --channels 1 --format s16 "$WAV" >>"$LOG" 2>&1 &
+pid=$!
+echo "$pid" > "$PIDFILE"
+echo "pw-record pid=$pid" >> "$LOG"
+
+sleep 0.05
+if kill -0 "$pid" 2>/dev/null; then
+  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Recording…" || true
+else
+  echo "pw-record died immediately" >> "$LOG"
+  command -v notify-send >/dev/null 2>&1 && notify-send "Codex PTT" "Recording failed (see ptt.log)" || true
+fi

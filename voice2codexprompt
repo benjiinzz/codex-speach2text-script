@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MIC_ID="59"
+TMPDIR="${XDG_RUNTIME_DIR:-/tmp}"
+BASE="$TMPDIR/codex_voice"
+WAV="$BASE.wav"
+TXT="$BASE.txt"
+
+WHISPER_DIR="${WHISPER_DIR:-$HOME/src/whisper.cpp}"
+WHISPER_BIN="$WHISPER_DIR/build/bin/whisper-cli"
+MODEL="$WHISPER_DIR/models/ggml-base.en.bin"
+
+rm -f "$WAV" "$TXT"
+
+# Push-to-talk: press Enter to stop
+pw-record --target "$MIC_ID" --rate 16000 --channels 1 --format s16 "$WAV" &
+REC_PID=$!
+echo "Recording… press Enter to stop."
+read -r
+kill -INT "$REC_PID" 2>/dev/null || true
+wait "$REC_PID" 2>/dev/null || true
+
+# Transcribe to $BASE.txt (note -otxt)
+"$WHISPER_BIN" -m "$MODEL" -f "$WAV" -otxt -of "$BASE" >/dev/null
+
+if [[ ! -s "$TXT" ]]; then
+  echo "ERROR: transcript not created at $TXT" >&2
+  echo "Files present:" >&2
+  ls -lah "$TMPDIR"/codex_voice* 2>/dev/null >&2 || true
+  exit 1
+fi
+
+TRANSCRIPT="$(tr -d '\r' < "$TXT" | sed -e 's/[[:space:]]\+/ /g' -e 's/^ *//; s/ *$//')"
+
+PROMPT=$'Rewrite the following speech transcript into ONE concise instruction for Codex CLI.\n\nRules:\n- Output ONLY the instruction (no preamble).\n- Use imperative mood.\n- Preserve file paths, identifiers, commands, and numbers exactly.\n- If multiple tasks, separate with "; ".\n\nTranscript:\n'"$TRANSCRIPT"
+codex exec "$PROMPT"
+
